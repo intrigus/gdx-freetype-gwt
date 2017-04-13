@@ -1,0 +1,60 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'idea'
+apply from: 'deploy.gradle'
+
+
+group = 'com.github.intrigus.gdx-freetype-gwt'
+version = '0.0.2-SNAPSHOT'
+archivesBaseName = "gdx-freetype-gwt"
+
+
+ext {
+    gdxVersion = "1.9.6"
+    gwtVersion = "2.8.0"
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+sourceSets.main.java.srcDirs = [ "src/" ]
+sourceSets.test.java.srcDirs = [ "test/" ]
+
+configurations.all {
+    resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
+}
+
+sourceCompatibility = 1.7
+targetCompatibility = 1.7
+
+//Get dependencies from Maven central repository
+repositories {
+    mavenCentral()
+    maven { url "https://oss.sonatype.org/content/repositories/snapshots/" }
+}
+
+
+//Project dependencies
+dependencies {
+	compileOnly "com.google.gwt:gwt-user:$gwtVersion"
+	compileOnly "com.google.gwt:gwt-dev:$gwtVersion"
+	compileOnly "com.badlogicgames.gdx:gdx-backend-gwt:$gdxVersion"
+	compileOnly "com.badlogicgames.gdx:gdx:$gdxVersion"	
+	
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '2.12'
+}
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            pom.project {
+                name 'gdx-freetype-gwt'
+                artifactId 'gdx-freetype-gwt'
+                packaging 'jar'
+                description 'Gdx Freetype for use with GWT.'
+            }
+        }
+    }
+}

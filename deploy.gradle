@@ -1,0 +1,70 @@
+apply plugin: 'maven'
+apply plugin: 'signing'
+
+ext.isReleaseVersion = !version.endsWith("SNAPSHOT")
+
+task javadocJar(type: Jar) {
+    classifier = 'javadoc'
+    from javadoc
+}
+
+task sourcesJar(type: Jar) {
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+
+artifacts {
+    archives javadocJar, sourcesJar
+}
+
+javadoc {
+    onlyIf { isReleaseVersion && gradle.taskGraph.hasTask("uploadArchives") }
+    options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:none', '-quiet')
+}
+
+signing {
+    required { isReleaseVersion && gradle.taskGraph.hasTask("uploadArchives") }
+    sign configurations.archives
+}
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+
+            repository(url: "https://oss.sonatype.org/service/local/staging/deploy/maven2/") {
+                authentication(userName: ossrhUsername, password: ossrhPassword)
+            }
+
+            snapshotRepository(url: "https://oss.sonatype.org/content/repositories/snapshots/") {
+                authentication(userName: ossrhUsername, password: ossrhPassword)
+            }
+
+            pom.project {
+                url 'https://github.com/intrigus/gdx-freetype-gwt/'
+
+                scm {
+                    connection 'scm:git:git@github.com:intrigus/gdx-freetype-gwt.git'
+                    developerConnection 'scm:git:git@github.com:intrigus/gdx-freetype-gwt.git'
+                    url 'git@github.com:intrigus/gdx-freetype-gwt.git'
+                }
+
+                licenses {
+                    license {
+                        name 'The Apache License, Version 2.0'
+                        url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
+
+                developers {
+                    developer {
+                        id 'intrigus'
+                        name 'Simon Gerst'
+                        url 'https://github.com/intrigus'
+                    }
+                }
+            }      
+        }
+    }
+}
