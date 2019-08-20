@@ -17,8 +17,8 @@ after
 
 Add 
 ````
- compile "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:0.0.2-SNAPSHOT"
- compile "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:0.0.2-SNAPSHOT:sources"
+ compile "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:$gdxVersion"
+ compile "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:$gdxVersion:sources"
 ````
 
 3. Modify your `HtmlLauncher.java` (or if it's not named so, modify the class in your `html` project that extends `GwtApplication`)
@@ -38,3 +38,10 @@ public void onModuleLoad () {
 ````
 
 4. Profit and Enjoy
+
+# Note
+If gradle fails to resolve the dependency this most likely means that there no matching gdx-freetype-gwt version has been published.
+
+You should try previous versions since freetype is generally updated rarely.
+
+In any case open an issue.
