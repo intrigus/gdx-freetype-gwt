@@ -3,6 +3,8 @@
 <module>
 	<inherits name='java.nio' />
 	<public path='public' />
-	<source path="gwt" />
+	<source path="gwt">
+		<exclude name="**/emu/**" />
+	</source>
 	<super-source path="gwt/emu" />
 </module>
