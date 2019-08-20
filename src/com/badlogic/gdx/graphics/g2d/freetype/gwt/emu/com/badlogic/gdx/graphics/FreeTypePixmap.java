@@ -38,6 +38,25 @@ public class FreeTypePixmap extends Pixmap {
 	public void setPixelsNull () {
 		pixels = null;
 	}
+	
+	/**
+	 * Returns a read-only ByteBuffer that represents the **current** status of the
+	 * pixels. Any change that is performed to the pixmap **after** this buffer has
+	 * been created will **not** be reflected in this buffer!
+	 * 
+	 * @param pixmap
+	 * @return
+	 */
+	public static ByteBuffer getRealPixels(Pixmap pixmap) {
+		if (pixmap.getWidth() == 0 || pixmap.getHeight() == 0) {
+			return new DirectReadWriteByteBuffer(0);
+		}
+		if (pixmap.pixels == null) {
+			pixmap.pixels = pixmap.getContext().getImageData(0, 0, pixmap.getWidth(), pixmap.getHeight()).getData();
+		}
+		ByteBuffer buffer = FreeTypeUtil.newDirectReadWriteByteBuffer(((Uint8ClampedArray) pixmap.pixels).buffer());
+		return buffer;
+	}
 
 	public ByteBuffer getRealPixels () {
 		if (getWidth() == 0 || getHeight() == 0) {

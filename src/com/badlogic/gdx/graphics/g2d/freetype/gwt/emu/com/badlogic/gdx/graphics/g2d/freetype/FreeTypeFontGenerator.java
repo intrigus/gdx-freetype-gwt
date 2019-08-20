@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.FreeTypePixmap;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Pixmap.Blending;
 import com.badlogic.gdx.graphics.Pixmap.Format;
@@ -526,14 +527,14 @@ public class FreeTypeFontGenerator implements Disposable {
 				int mainW = mainPixmap.getWidth(), mainH = mainPixmap.getHeight();
 				int shadowOffsetX = Math.max(parameter.shadowOffsetX, 0), shadowOffsetY = Math.max(parameter.shadowOffsetY, 0);
 				int shadowW = mainW + Math.abs(parameter.shadowOffsetX), shadowH = mainH + Math.abs(parameter.shadowOffsetY);
-				Pixmap shadowPixmap = new Pixmap(shadowW, shadowH, mainPixmap.getFormat());
+				Pixmap shadowPixmap = new FreeTypePixmap(shadowW, shadowH, mainPixmap.getFormat());
 
 				Color shadowColor = parameter.shadowColor;
 				float a = shadowColor.a;
 				if (a != 0) {
 					byte r = (byte)(shadowColor.r * 255), g = (byte)(shadowColor.g * 255), b = (byte)(shadowColor.b * 255);
-					ByteBuffer mainPixels = mainPixmap.getPixels();
-					ByteBuffer shadowPixels = shadowPixmap.getPixels();
+					ByteBuffer mainPixels = FreeTypePixmap.getRealPixels(mainPixmap);
+					ByteBuffer shadowPixels = ((FreeTypePixmap)shadowPixmap).getRealPixels();
 					for (int y = 0; y < mainH; y++) {
 						int shadowRow = shadowW * (y + shadowOffsetY) + shadowOffsetX;
 						for (int x = 0; x < mainW; x++) {
@@ -547,6 +548,7 @@ public class FreeTypeFontGenerator implements Disposable {
 							shadowPixels.put(shadowPixel + 3, (byte)((mainA & 0xff) * a));
 						}
 					}
+					((FreeTypePixmap)shadowPixmap).putPixelsBack(shadowPixels);
 				}
 
 				// Draw main glyph (with any border) on top of shadow.
