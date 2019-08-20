@@ -90,7 +90,7 @@ public class FreeType {
 		public Face newFace(FileHandle fontFile, int faceIndex) {
 			ByteBuffer buffer = null;
 			try {
-				buffer = fontFile.map();
+				//buffer = fontFile.map(); //method missing in gwt emulation
 			} catch (GdxRuntimeException ignored) {
 				// OK to ignore, some platforms do not support file mapping.
 			}
