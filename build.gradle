@@ -5,12 +5,12 @@ apply from: 'deploy.gradle'
 
 
 group = 'com.github.intrigus.gdx-freetype-gwt'
-version = '1.9.10'
+version = '1.9.11-SNAPSHOT'
 archivesBaseName = "gdx-freetype-gwt"
 
 
 ext {
-    gdxVersion = "1.9.10"
+    gdxVersion = "1.9.11-SNAPSHOT"
     gwtVersion = "2.8.2"
 }
 
