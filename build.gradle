@@ -5,13 +5,13 @@ apply from: 'deploy.gradle'
 
 
 group = 'com.github.intrigus.gdx-freetype-gwt'
-version = '0.0.2-SNAPSHOT'
+version = '1.9.10'
 archivesBaseName = "gdx-freetype-gwt"
 
 
 ext {
-    gdxVersion = "1.9.6"
-    gwtVersion = "2.8.0"
+    gdxVersion = "1.9.10"
+    gwtVersion = "2.8.2"
 }
 
 [compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
