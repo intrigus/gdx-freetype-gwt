@@ -19,10 +19,13 @@ package com.badlogic.gdx.graphics.g2d.freetype;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.nio.FreeTypeUtil;
 import java.nio.IntBuffer;
 
+import java.nio.HasArrayBufferView;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.FreeTypePixmap;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Pixmap.Blending;
 import com.badlogic.gdx.graphics.Pixmap.Format;
@@ -30,8 +33,10 @@ import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.LongMap;
-import com.badlogic.gdx.utils.SharedLibraryLoader;
 import com.badlogic.gdx.utils.StreamUtils;
+import com.google.gwt.typedarrays.shared.ArrayBuffer;
+import com.google.gwt.typedarrays.shared.ArrayBufferView;
+import com.google.gwt.typedarrays.shared.Int8Array;
 
 public class FreeType {
 	// @off
@@ -43,41 +48,44 @@ public class FreeType {
 	static jint lastError = 0;	
 	 */
 	
+	private static native void nativeFree (int address)/*-{
+		$wnd.Module._free(address);
+	}-*/;
+	
 	/**
 	 * 
 	 * @return returns the last error code FreeType reported
 	 */
-	static native int getLastErrorCode(); /*
-		return lastError;
-	*/
+	static native int getLastErrorCode()/*-{
+		return $wnd.Module._c_FreeType_getLastErrorCode();
+	}-*/;
 	
 	private static class Pointer {
-		long address;
+		int address;
 		
-		Pointer(long address) {
+		Pointer(int address) {
 			this.address = address;
 		}
 	}
 	
 	public static class Library extends Pointer implements Disposable {
-		LongMap<ByteBuffer> fontData = new LongMap<ByteBuffer>();
+		LongMap<Integer> fontData = new LongMap<Integer>();
 		
-		Library (long address) {
+		Library (int address) {
 			super(address);
 		}
 
 		@Override
 		public void dispose () {
 			doneFreeType(address);
-			for(ByteBuffer buffer: fontData.values()) {
-				if (BufferUtils.isUnsafeByteBuffer(buffer)) 
-					BufferUtils.disposeUnsafeByteBuffer(buffer);
+			for(Integer address: fontData.values()) {
+				nativeFree(address);
 			}
 		}
 
-		private static native void doneFreeType(long library); /*
-			FT_Done_FreeType((FT_Library)library);
-		*/
+		private static native void doneFreeType (int library)/*-{
+			$wnd.Module._c_Library_doneFreeType(library);
+		}-*/;
 
 		public Face newFace(FileHandle fontFile, int faceIndex) {
 			ByteBuffer buffer = null;
@@ -93,11 +101,11 @@ public class FreeType {
 					if (fileSize == 0) {
 						// Copy to a byte[] to get the size, then copy to the buffer.
 						byte[] data = StreamUtils.copyStreamToByteArray(input, 1024 * 16);
-						buffer = BufferUtils.newUnsafeByteBuffer(data.length);
+						buffer = BufferUtils.newByteBuffer(data.length);
 						BufferUtils.copy(data, 0, buffer, data.length);
 					} else {
 						// Trust the specified file size.
-						buffer = BufferUtils.newUnsafeByteBuffer(fileSize);
+						buffer = BufferUtils.newByteBuffer(fileSize);
 						StreamUtils.copyStream(input, buffer);
 					}
 				} catch (IOException ex) {
@@ -110,241 +118,238 @@ public class FreeType {
 		}
 
 		public Face newMemoryFace(byte[] data, int dataSize, int faceIndex) {
-			ByteBuffer buffer = BufferUtils.newUnsafeByteBuffer(data.length);
+			ByteBuffer buffer = BufferUtils.newByteBuffer(data.length);
 			BufferUtils.copy(data, 0, buffer, data.length);
 			return newMemoryFace(buffer, faceIndex);
 		}
 
 		public Face newMemoryFace(ByteBuffer buffer, int faceIndex) {
-			long face = newMemoryFace(address, buffer, buffer.remaining(), faceIndex);
-			if(face == 0) {
-				if (BufferUtils.isUnsafeByteBuffer(buffer)) 
-					BufferUtils.disposeUnsafeByteBuffer(buffer);
+			ArrayBufferView buf = ((HasArrayBufferView)buffer).getTypedArray();
+			int[] addressToFree = new int[] {0}; // Hacky way to get two return values
+			int face = newMemoryFace(address, buf, buffer.remaining(), faceIndex, addressToFree);
+			if (face == 0) {
+				if (addressToFree[0] != 0) { // 'Zero' would mean allocating the buffer failed
+					nativeFree(addressToFree[0]);
+				}
 				throw new GdxRuntimeException("Couldn't load font, FreeType error code: " + getLastErrorCode());
 			}
 			else {
-				fontData.put(face, buffer);
+				fontData.put(face, addressToFree[0]);
 				return new Face(face, this);
 			}
 		}
 
-		private static native long newMemoryFace(long library, ByteBuffer data, int dataSize, int faceIndex); /*
-			FT_Face face = 0;
-			FT_Error error = FT_New_Memory_Face((FT_Library)library, (const FT_Byte*)data, dataSize, faceIndex, &face);
-			if(error) {
-				lastError = error;
-				return 0;
-			}
-			else return (jlong)face;
-		*/
+		private static native int newMemoryFace (int library, ArrayBufferView data, int dataSize, int faceIndex,
+			int[] outAddressToFree)/*-{
+			var address = $wnd.Module._malloc(data.length);
+			outAddressToFree[0] = address;
+			$wnd.Module.writeArrayToMemory(data, address);
+			return $wnd.Module._c_Library_newMemoryFace(library, address,
+						dataSize, faceIndex);
+			}-*/;
 
 		public Stroker createStroker() {
-			long stroker = strokerNew(address);
+			int stroker = strokerNew(address);
 			if(stroker == 0) throw new GdxRuntimeException("Couldn't create FreeType stroker, FreeType error code: " + getLastErrorCode());
 			return new Stroker(stroker);
 		}
 
-		private static native long strokerNew(long library); /*
-			FT_Stroker stroker;
-			FT_Error error = FT_Stroker_New((FT_Library)library, &stroker);
-			if(error) {
-				lastError = error;
-				return 0;
-			}
-			else return (jlong)stroker;
-		*/
+		private static native int strokerNew (int library)/*-{
+			return $wnd.Module._c_Library_strokerNew(library);
+		}-*/;
 	}
 	
 	public static class Face extends Pointer implements Disposable {
 		Library library;
 		
-		public Face (long address, Library library) {
+		public Face (int address, Library library) {
 			super(address);
 			this.library = library;
 		}
 		
 		@Override
-		public void dispose() {
+		public void dispose () {
 			doneFace(address);
-			ByteBuffer buffer = library.fontData.get(address);
-			if(buffer != null) {
+			Integer freeAddress = library.fontData.get(address);
+			if (freeAddress != 0) { // Don't free 'zero' address
 				library.fontData.remove(address);
-				if (BufferUtils.isUnsafeByteBuffer(buffer)) 
-					BufferUtils.disposeUnsafeByteBuffer(buffer);
+				nativeFree(freeAddress);
 			}
 		}
 
-		private static native void doneFace(long face); /*
-			FT_Done_Face((FT_Face)face);
-		*/
+		private static native void doneFace (int face)/*-{
+			$wnd.Module._c_Face_doneFace(face);
+		}-*/;
 
 		public int getFaceFlags() {
 			return getFaceFlags(address);
 		}
 		
-		private static native int getFaceFlags(long face); /*
-			return ((FT_Face)face)->face_flags;
-		*/
+		private static native int getFaceFlags (int face)/*-{
+			return $wnd.Module._c_Face_getFaceFlags(face);
+		}-*/;
 		
 		public int getStyleFlags() {
 			return getStyleFlags(address);
 		}
 		
-		private static native int getStyleFlags(long face); /*
-			return ((FT_Face)face)->style_flags;
-		*/
+		private static native int getStyleFlags (int face)/*-{
+			return $wnd.Module._c_Face_getStyleFlags(face);
+		}-*/;
+
 		
 		public int getNumGlyphs() {
 			return getNumGlyphs(address);
 		}
 		
-		private static native int getNumGlyphs(long face); /*
-			return ((FT_Face)face)->num_glyphs;
-		*/
+		private static native int getNumGlyphs (int face)/*-{
+			return $wnd.Module._c_Face_getNumGlyphs(face);
+		}-*/;
 		
 		public int getAscender() {
 			return getAscender(address);
 		}
 		
-		private static native int getAscender(long face); /*
-			return ((FT_Face)face)->ascender;
-		*/
+		private static native int getAscender (int face)/*-{
+			return $wnd.Module._c_Face_getAscender(face);
+		}-*/;
 		
 		public int getDescender() {
 			return getDescender(address);
 		}
 		
-		private static native int getDescender(long face); /*
-			return ((FT_Face)face)->descender;
-		*/
+		private static native int getDescender (int face)/*-{
+			return $wnd.Module._c_Face_getDescender(face);
+		}-*/;
 		
 		public int getHeight() {
 			return getHeight(address);
 		}
 		
-		private static native int getHeight(long face); /*
-			return ((FT_Face)face)->height;
-		*/
+		private static native int getHeight (int face)/*-{
+			return $wnd.Module._c_Face_getHeight(face);
+		}-*/;
 		
 		public int getMaxAdvanceWidth() {
 			return getMaxAdvanceWidth(address);
 		}
 		
-		private static native int getMaxAdvanceWidth(long face); /*
-			return ((FT_Face)face)->max_advance_width;
-		*/
+		private static native int getMaxAdvanceWidth (int face)/*-{
+			return $wnd.Module._c_Face_getMaxAdvanceWidth(face);
+		}-*/;
 		
 		public int getMaxAdvanceHeight() {
 			return getMaxAdvanceHeight(address);
 		}
 		
-		private static native int getMaxAdvanceHeight(long face); /*
-			return ((FT_Face)face)->max_advance_height;
-		*/
+		private static native int getMaxAdvanceHeight (int face)/*-{
+			return $wnd.Module._c_Face_getMaxAdvanceHeight(face);
+		}-*/;
 		
 		public int getUnderlinePosition() {
 			return getUnderlinePosition(address);
 		}
 		
-		private static native int getUnderlinePosition(long face); /*
-			return ((FT_Face)face)->underline_position;
-		*/
+		private static native int getUnderlinePosition (int face)/*-{
+			return $wnd.Module._c_Face_getUnderlinePosition(face);
+		}-*/;
 		
 		public int getUnderlineThickness() {
 			return getUnderlineThickness(address);
 		}
 		
-		private static native int getUnderlineThickness(long face); /*
-			return ((FT_Face)face)->underline_thickness;
-		*/
+		private static native int getUnderlineThickness (int face)/*-{
+			return $wnd.Module._c_Face_getUnderlineThickness(face);
+		}-*/;
 		
 		public boolean selectSize(int strikeIndex) {
 			return selectSize(address, strikeIndex);
 		}
 
-		private static native boolean selectSize(long face, int strike_index); /*
-			return !FT_Select_Size((FT_Face)face, strike_index);
-		*/
+		private static native boolean selectSize (int face, int strike_index)/*-{
+			return !!$wnd.Module._c_Face_selectSize(face, strike_index);
+		}-*/;
 
 		public boolean setCharSize(int charWidth, int charHeight, int horzResolution, int vertResolution) {
 			return setCharSize(address, charWidth, charHeight, horzResolution, vertResolution);
 		}
 
-		private static native boolean setCharSize(long face, int charWidth, int charHeight, int horzResolution, int vertResolution); /*
-			return !FT_Set_Char_Size((FT_Face)face, charWidth, charHeight, horzResolution, vertResolution);
-		*/
+		private static native boolean setCharSize (int face, int charWidth, int charHeight, int horzResolution,
+				int vertResolution)/*-{
+				return !!$wnd.Module._c_Face_setCharSize(face, charWidth,
+						charHeight, horzResolution, vertResolution);
+		}-*/;
 
 		public boolean setPixelSizes(int pixelWidth, int pixelHeight) {
 			return setPixelSizes(address, pixelWidth, pixelHeight);
 		}
 
-		private static native boolean setPixelSizes(long face, int pixelWidth, int pixelHeight); /*
-			return !FT_Set_Pixel_Sizes((FT_Face)face, pixelWidth, pixelHeight);
-		*/
+		private static native boolean setPixelSizes (int face, int pixelWidth, int pixelHeight)/*-{
+			return !!$wnd.Module._c_Face_setPixelSizes(face, pixelWidth,
+				pixelHeight);
+		}-*/;
 
 		public boolean loadGlyph(int glyphIndex, int loadFlags) {
 			return loadGlyph(address, glyphIndex, loadFlags);
 		}
 
-		private static native boolean loadGlyph(long face, int glyphIndex, int loadFlags); /*
-			return !FT_Load_Glyph((FT_Face)face, glyphIndex, loadFlags);
-		*/
+		private static native boolean loadGlyph (int face, int glyphIndex, int loadFlags)/*-{
+			return !!$wnd.Module._c_Face_loadGlyph(face, glyphIndex, loadFlags);
+		}-*/;
 
 		public boolean loadChar(int charCode, int loadFlags) {
 			return loadChar(address, charCode, loadFlags);
 		}
 
-		private static native boolean loadChar(long face, int charCode, int loadFlags); /*
-			return !FT_Load_Char((FT_Face)face, charCode, loadFlags);
-		*/
+		private static native boolean loadChar (int face, int charCode, int loadFlags)/*-{
+			return !!$wnd.Module._c_Face_loadChar(face, charCode, loadFlags);
+		}-*/;
 
 		public GlyphSlot getGlyph() {
 			return new GlyphSlot(getGlyph(address));
 		}
 		
-		private static native long getGlyph(long face); /*
-			return (jlong)((FT_Face)face)->glyph;
-		*/
+		private static native int getGlyph (int face)/*-{
+			return $wnd.Module._c_Face_getGlyph(face);
+		}-*/;
 		
 		public Size getSize() {
 			return new Size(getSize(address));
 		}
 		
-		private static native long getSize(long face); /*
-			return (jlong)((FT_Face)face)->size;
-		*/
+		private static native int getSize (int face)/*-{
+			return $wnd.Module._c_Face_getSize(face);
+		}-*/;
 
 		public boolean hasKerning() {
 			return hasKerning(address);
 		}
 
-		private static native boolean hasKerning(long face); /*
-			return FT_HAS_KERNING(((FT_Face)face));
-		*/
+		private static native boolean hasKerning (int face)/*-{
+			return !!$wnd.Module._c_Face_hasKerning(face);
+		}-*/;
 
 		public int getKerning(int leftGlyph, int rightGlyph, int kernMode) {
 			return getKerning(address, leftGlyph, rightGlyph, kernMode);
 		}
 
-		private static native int getKerning(long face, int leftGlyph, int rightGlyph, int kernMode); /*
-			FT_Vector kerning;
-			FT_Error error = FT_Get_Kerning((FT_Face)face, leftGlyph, rightGlyph, kernMode, &kerning);
-			if(error) return 0;
-			return kerning.x;
-		*/
+		private static native int getKerning (int face, int leftGlyph, int rightGlyph, int kernMode)/*-{
+			return $wnd.Module._c_Face_getKerning(face, leftGlyph, rightGlyph,
+						kernMode);
+		}-*/;
 
 		public int getCharIndex(int charCode) {
 			return getCharIndex(address, charCode);
 		}
 
-		private static native int getCharIndex(long face, int charCode); /*
-			return FT_Get_Char_Index((FT_Face)face, charCode);
-		*/
+		private static native int getCharIndex (int face, int charCode)/*-{
+			return $wnd.Module._c_Face_getCharIndex(face, charCode);
+		}-*/;
 
 	}
 	
 	public static class Size extends Pointer {
-		Size (long address) {
+		Size (int address) {
 			super(address);
 		}
 		
@@ -352,13 +357,13 @@ public class FreeType {
 			return new SizeMetrics(getMetrics(address));
 		}
 		
-		private static native long getMetrics(long address); /*
-			return (jlong)&((FT_Size)address)->metrics;
-		*/
+		private static native int getMetrics (int address)/*-{
+			return $wnd.Module._c_Size_getMetrics(address);
+		}-*/;
 	}
 	
 	public static class SizeMetrics extends Pointer {
-		SizeMetrics (long address) {
+		SizeMetrics (int address) {
 			super(address);
 		}
 		
@@ -366,69 +371,69 @@ public class FreeType {
 			return getXppem(address);
 		}
 		
-		private static native int getXppem(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->x_ppem;
-		*/
+		private static native int getXppem (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getXppem(metrics);
+		}-*/;
 		
 		public int getYppem() {
 			return getYppem(address);
 		}
 		
-		private static native int getYppem(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->y_ppem;
-		*/
+		private static native int getYppem (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getYppem(metrics);
+		}-*/;
 		
 		public int getXScale() {
 			return getXscale(address);
 		}
 		
-		private static native int getXscale(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->x_scale;
-		*/
+		private static native int getXscale (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getXscale(metrics);
+		}-*/;
 		
 		public int getYscale() {
 			return getYscale(address);
 		}
 		
-		private static native int getYscale(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->x_scale;
-		*/
+		private static native int getYscale (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getYscale(metrics);
+		}-*/;
 		
 		public int getAscender() {
 			return getAscender(address);
 		}
 		
-		private static native int getAscender(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->ascender;
-		*/
+		private static native int getAscender (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getAscender(metrics);
+		}-*/;
 		
 		public int getDescender() {
 			return getDescender(address);
 		}
 		
-		private static native int getDescender(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->descender;
-		*/
+		private static native int getDescender (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getDescender(metrics);
+		}-*/;
 		
 		public int getHeight() {
 			return getHeight(address);
 		}
 		
-		private static native int getHeight(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->height;
-		*/
+		private static native int getHeight (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getHeight(metrics);
+		}-*/;
 		
 		public int getMaxAdvance() {
 			return getMaxAdvance(address);
 		}
 		
-		private static native int getMaxAdvance(long metrics); /*
-			return ((FT_Size_Metrics*)metrics)->max_advance;
-		*/
+		private static native int getMaxAdvance (int metrics)/*-{
+			return $wnd.Module._c_SizeMetrics_getMaxAdvance(metrics);
+		}-*/;
 	}
 	
 	public static class GlyphSlot extends Pointer {
-		GlyphSlot (long address) {
+		GlyphSlot (int address) {
 			super(address);
 		}
 		
@@ -436,104 +441,97 @@ public class FreeType {
 			return new GlyphMetrics(getMetrics(address));
 		}		
 		
-		private static native long getMetrics(long slot); /*
-			return (jlong)&((FT_GlyphSlot)slot)->metrics;
-		*/
+		private static native int getMetrics (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getMetrics(slot);
+		}-*/;
 		
 		public int getLinearHoriAdvance() {
 			return getLinearHoriAdvance(address);
 		}
 		
-		private static native int getLinearHoriAdvance(long slot); /*
-			return ((FT_GlyphSlot)slot)->linearHoriAdvance;
-		*/
+		private static native int getLinearHoriAdvance (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getLinearHoriAdvance(slot);
+		}-*/;
 		
 		public int getLinearVertAdvance() {
 			return getLinearVertAdvance(address);
 		}
 		
-		private static native int getLinearVertAdvance(long slot); /*
-			return ((FT_GlyphSlot)slot)->linearVertAdvance;
-		*/
+		private static native int getLinearVertAdvance (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getLinearVertAdvance(slot);
+		}-*/;
 		
 		public int getAdvanceX() {
 			return getAdvanceX(address);
 		}
 		
-		private static native int getAdvanceX(long slot); /*
-			return ((FT_GlyphSlot)slot)->advance.x;
-		*/
+		private static native int getAdvanceX (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getAdvanceX(slot);
+		}-*/;
 		
 		public int getAdvanceY() {
 			return getAdvanceY(address);
 		}
 		
-		private static native int getAdvanceY(long slot); /*
-			return ((FT_GlyphSlot)slot)->advance.y;
-		*/
+		private static native int getAdvanceY (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getAdvanceY(slot);
+		}-*/;
 		
 		public int getFormat() {
 			return getFormat(address);
 		}
 		
-		private static native int getFormat(long slot); /*
-			return ((FT_GlyphSlot)slot)->format;
-		*/
+		private static native int getFormat (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getFormat(slot);
+		}-*/;
 		
 		public Bitmap getBitmap() {
 			return new Bitmap(getBitmap(address));
 		}
 		
-		private static native long getBitmap(long slot); /*
-			FT_GlyphSlot glyph = ((FT_GlyphSlot)slot);
-			return (jlong)&(glyph->bitmap);
-		*/
+		private static native int getBitmap (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getBitmap(slot);
+		}-*/;
 		
 		public int getBitmapLeft() {
 			return getBitmapLeft(address);
 		}
 		
-		private static native int getBitmapLeft(long slot); /*
-			return ((FT_GlyphSlot)slot)->bitmap_left;
-		*/
+		private static native int getBitmapLeft (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getBitmapLeft(slot);
+		}-*/;
 		
 		public int getBitmapTop() {
 			return getBitmapTop(address);
 		}
 		
-		private static native int getBitmapTop(long slot); /*
-			return ((FT_GlyphSlot)slot)->bitmap_top;
-		*/
+		private static native int getBitmapTop (int slot)/*-{
+			return $wnd.Module._c_GlyphSlot_getBitmapTop(slot);
+		}-*/;
 
 		public boolean renderGlyph(int renderMode) {
 			return renderGlyph(address, renderMode);
 		}
 
-		private static native boolean renderGlyph(long slot, int renderMode); /*
-			return !FT_Render_Glyph((FT_GlyphSlot)slot, (FT_Render_Mode)renderMode);
-		*/
+		private static native boolean renderGlyph (int slot, int renderMode)/*-{
+			return !!$wnd.Module._c_GlyphSlot_renderGlyph(slot, renderMode);
+		}-*/;
 
 		public Glyph getGlyph() {
-			long glyph = getGlyph(address);
+			int glyph = getGlyph(address);
 			if(glyph == 0) throw new GdxRuntimeException("Couldn't get glyph, FreeType error code: " + getLastErrorCode());
 			return new Glyph(glyph);
 		}
 
-		private static native long getGlyph(long glyphSlot); /*
-			FT_Glyph glyph;
-			FT_Error error = FT_Get_Glyph((FT_GlyphSlot)glyphSlot, &glyph);
-			if(error) {
-				lastError = error;
-				return 0;
-			}
-			else return (jlong)glyph;
-		*/
+		private static native int getGlyph (int glyphSlot)/*-{
+			return $wnd.Module._c_GlyphSlot_getGlyph(glyphSlot);
+		}-*/;
 	}
 	
 	public static class Glyph extends Pointer implements Disposable {
 		private boolean rendered;
 
-		Glyph (long address) {
+		Glyph (int address) {
 			super(address);
 		}
 
@@ -542,36 +540,32 @@ public class FreeType {
 			done(address);
 		}
 
-		private static native void done(long glyph); /*
-			FT_Done_Glyph((FT_Glyph)glyph);
-		*/
-
-		public void strokeBorder(Stroker stroker, boolean inside) {
-			address = strokeBorder(address, stroker.address, inside);
+		private static native void done (int glyph)/*-{
+			$wnd.Module._c_Glyph_done(glyph);
+		}-*/;
+		
+		private int bTI (boolean bool) {
+			return bool == true ? 1 : 0;
 		}
 
-		private static native long strokeBorder(long glyph, long stroker, boolean inside); /*
-			FT_Glyph border_glyph = (FT_Glyph)glyph;
-			FT_Glyph_StrokeBorder(&border_glyph, (FT_Stroker)stroker, inside, 1);
-			return (jlong)border_glyph;
-		*/
+		public void strokeBorder(Stroker stroker, boolean inside) {
+			address = strokeBorder(address, stroker.address, bTI(inside));
+		}
+
+		private static native int strokeBorder (int glyph, int stroker, int inside)/*-{
+			return $wnd.Module._c_Glyph_strokeBorder(glyph, stroker, inside);
+		}-*/;
 
 		public void toBitmap(int renderMode) {
-			long bitmap = toBitmap(address, renderMode);
+			int bitmap = toBitmap(address, renderMode);
 			if (bitmap == 0) throw new GdxRuntimeException("Couldn't render glyph, FreeType error code: " + getLastErrorCode());
 			address = bitmap;
 			rendered = true;
 		}
 
-		private static native long toBitmap(long glyph, int renderMode); /*
-			FT_Glyph bitmap = (FT_Glyph)glyph;
-			FT_Error error = FT_Glyph_To_Bitmap(&bitmap, (FT_Render_Mode)renderMode, NULL, 1);
-			if(error) {
-				lastError = error;
-				return 0;
-			}
-			return (jlong)bitmap;
-		*/
+		private static native int toBitmap (int glyph, int renderMode)/*-{
+			return $wnd.Module._c_Glyph_toBitmap(glyph, renderMode);
+		}-*/;
 
 		public Bitmap getBitmap() {
 			if (!rendered) {
@@ -580,10 +574,9 @@ public class FreeType {
 			return new Bitmap(getBitmap(address));
 		}
 
-		private static native long getBitmap(long glyph); /*
-			FT_BitmapGlyph glyph_bitmap = ((FT_BitmapGlyph)glyph);
-			return (jlong)&(glyph_bitmap->bitmap);
-		*/
+		private static native int getBitmap (int glyph)/*-{
+			return $wnd.Module._c_Glyph_getBitmap(glyph);
+		}-*/;
 
 		public int getLeft() {
 			if (!rendered) {
@@ -592,10 +585,9 @@ public class FreeType {
 			return getLeft(address);
 		}
 
-		private static native int getLeft(long glyph); /*
-			FT_BitmapGlyph glyph_bitmap = ((FT_BitmapGlyph)glyph);
-			return glyph_bitmap->left;
-		*/
+		private static native int getLeft (int glyph)/*-{
+			return $wnd.Module._c_Glyph_getLeft(glyph);
+		}-*/;
 
 		public int getTop() {
 			if (!rendered) {
@@ -604,15 +596,14 @@ public class FreeType {
 			return getTop(address);
 		}
 
-		private static native int getTop(long glyph); /*
-			FT_BitmapGlyph glyph_bitmap = ((FT_BitmapGlyph)glyph);
-			return glyph_bitmap->top;
-		*/
+		private static native int getTop (int glyph)/*-{
+			return $wnd.Module._c_Glyph_getTop(glyph);
+		}-*/;
 
 	}
 
 	public static class Bitmap extends Pointer {
-		Bitmap (long address) {
+		Bitmap (int address) {
 			super(address);
 		}
 		
@@ -620,58 +611,75 @@ public class FreeType {
 			return getRows(address);
 		}
 		
-		private static native int getRows(long bitmap); /*
-			return ((FT_Bitmap*)bitmap)->rows;
-		*/
+		private static native int getRows (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getRows(bitmap);
+		}-*/;
 		
 		public int getWidth() {
 			return getWidth(address);
 		}
 		
-		private static native int getWidth(long bitmap); /*
-			return ((FT_Bitmap*)bitmap)->width;
-		*/
+		private static native int getWidth (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getWidth(bitmap);
+		}-*/;
 		
 		public int getPitch() {
 			return getPitch(address);
 		}
 		
-		private static native int getPitch(long bitmap); /*
-			return ((FT_Bitmap*)bitmap)->pitch;
-		*/
+		private static native int getPitch (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getPitch(bitmap);
+		}-*/;
 		
-		public ByteBuffer getBuffer() {
+		public ByteBuffer getBuffer () {
 			if (getRows() == 0)
 				// Issue #768 - CheckJNI frowns upon env->NewDirectByteBuffer with NULL buffer or capacity 0
-				//                  "JNI WARNING: invalid values for address (0x0) or capacity (0)"
-				//              FreeType sets FT_Bitmap::buffer to NULL when the bitmap is empty (e.g. for ' ')
-				//              JNICheck is on by default on emulators and might have a point anyway...
-				//              So let's avoid this and just return a dummy non-null non-zero buffer
+				// "JNI WARNING: invalid values for address (0x0) or capacity (0)"
+				// FreeType sets FT_Bitmap::buffer to NULL when the bitmap is empty (e.g. for ' ')
+				// JNICheck is on by default on emulators and might have a point anyway...
+				// So let's avoid this and just return a dummy non-null non-zero buffer
 				return BufferUtils.newByteBuffer(1);
-			return getBuffer(address);
+			int offset = getBufferAddress(address);
+			int length = getBufferSize(address);
+			Int8Array as = getBuffer(address, offset, length);
+			ArrayBuffer aBuf = as.buffer();
+			ByteBuffer buf = FreeTypeUtil.newDirectReadWriteByteBuffer(aBuf, length, offset);
+
+			return buf;
 		}
 
-		private static native ByteBuffer getBuffer(long bitmap); /*
-			FT_Bitmap* bmp = (FT_Bitmap*)bitmap;
-			return env->NewDirectByteBuffer((void*)bmp->buffer, bmp->rows * abs(bmp->pitch));
-		*/
+		private static native int getBufferAddress (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getBufferAddress(bitmap);
+		}-*/;
+
+		private static native int getBufferSize (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getBufferSize(bitmap);
+		}-*/;
+
+		private static native Int8Array getBuffer (int bitmap, int offset, int length)/*-{
+			var buff = $wnd.Module.HEAP8.subarray(offset, offset + length);
+			return buff;
+		}-*/;
 
 		// @on
 		public Pixmap getPixmap (Format format, Color color, float gamma) {
 			int width = getWidth(), rows = getRows();
 			ByteBuffer src = getBuffer();
-			Pixmap pixmap;
+			FreeTypePixmap pixmap;
+			ByteBuffer changedPixels;
 			int pixelMode = getPixelMode();
 			int rowBytes = Math.abs(getPitch()); // We currently ignore negative pitch.
 			if (color == Color.WHITE && pixelMode == FT_PIXEL_MODE_GRAY && rowBytes == width && gamma == 1) {
-				pixmap = new Pixmap(width, rows, Format.Alpha);
-				BufferUtils.copy(src, pixmap.getPixels(), pixmap.getPixels().capacity());
+				pixmap = new FreeTypePixmap(width, rows, Format.Alpha);
+				changedPixels = pixmap.getRealPixels();
+				BufferUtils.copy(src, changedPixels, changedPixels.capacity());
 			} else {
-				pixmap = new Pixmap(width, rows, Format.RGBA8888);
+				pixmap = new FreeTypePixmap(width, rows, Format.RGBA8888);
 				int rgba = Color.rgba8888(color);
 				byte[] srcRow = new byte[rowBytes];
 				int[] dstRow = new int[width];
-				IntBuffer dst = pixmap.getPixels().asIntBuffer();
+				changedPixels = pixmap.getRealPixels();
+				IntBuffer dst = changedPixels.asIntBuffer();
 				if (pixelMode == FT_PIXEL_MODE_MONO) {
 					// Use the specified color for each set bit.
 					for (int y = 0; y < rows; y++) {
@@ -709,6 +717,9 @@ public class FreeType {
 					}
 				}
 			}
+			
+			pixmap.putPixelsBack(changedPixels);
+			pixmap.setPixelsNull();
 
 			Pixmap converted = pixmap;
 			if (format != pixmap.getFormat()) {
@@ -726,21 +737,21 @@ public class FreeType {
 			return getNumGray(address);
 		}
 		
-		private static native int getNumGray(long bitmap); /*
-			return ((FT_Bitmap*)bitmap)->num_grays;
-		*/
+		private static native int getNumGray (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getNumGray(bitmap);
+		}-*/;
 		
 		public int getPixelMode() {
 			return getPixelMode(address);
 		}
 		
-		private static native int getPixelMode(long bitmap); /*
-			return ((FT_Bitmap*)bitmap)->pixel_mode;
-		*/
+		private static native int getPixelMode (int bitmap)/*-{
+			return $wnd.Module._c_Bitmap_getPixelMode(bitmap);
+		}-*/;
 	}
 	
 	public static class GlyphMetrics extends Pointer {
-		GlyphMetrics (long address) {
+		GlyphMetrics (int address) {
 			super(address);
 		}
 		
@@ -748,69 +759,69 @@ public class FreeType {
 			return getWidth(address);
 		}
 		
-		private static native int getWidth(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->width;
-		*/
+		private static native int getWidth (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getWidth(metrics);
+		}-*/;
 		
 		public int getHeight() {
 			return getHeight(address);
 		}
 		
-		private static native int getHeight(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->height;
-		*/
+		private static native int getHeight (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getHeight(metrics);
+		}-*/;
 		
 		public int getHoriBearingX() {
 			return getHoriBearingX(address);
 		}
 		
-		private static native int getHoriBearingX(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->horiBearingX;
-		*/
+		private static native int getHoriBearingX (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getHoriBearingX(metrics);
+		}-*/;
 		
 		public int getHoriBearingY() {
 			return getHoriBearingY(address);
 		}
 		
-		private static native int getHoriBearingY(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->horiBearingY;
-		*/
+		private static native int getHoriBearingY (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getHoriBearingY(metrics);
+		}-*/;
 		
 		public int getHoriAdvance() {
 			return getHoriAdvance(address);
 		}
 		
-		private static native int getHoriAdvance(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->horiAdvance;
-		*/
+		private static native int getHoriAdvance (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getHoriAdvance(metrics);
+		}-*/;
 	
 		public int getVertBearingX() {
 			return getVertBearingX(address);
 		}
 		
-		private static native int getVertBearingX(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->vertBearingX;
-		*/
+		private static native int getVertBearingX (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getVertBearingX(metrics);
+		}-*/;
 		
 		public int getVertBearingY() {
 			return getVertBearingY(address);
 		}
 	
-		private static native int getVertBearingY(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->vertBearingY;
-		 */
+		private static native int getVertBearingY (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getVertBearingY(metrics);
+		}-*/;
 		
 		public int getVertAdvance() {
 			return getVertAdvance(address);
 		}
 	
-		private static native int getVertAdvance(long metrics); /*
-			return ((FT_Glyph_Metrics*)metrics)->vertAdvance;
-		*/
+		private static native int getVertAdvance (int metrics)/*-{
+			return $wnd.Module._c_GlyphMetrics_getVertAdvance(metrics);
+		}-*/;
 	}
 
 	public static class Stroker extends Pointer implements Disposable {
-		Stroker(long address) {
+		Stroker(int address) {
 			super(address);
 		}
 
@@ -818,18 +829,19 @@ public class FreeType {
 			set(address, radius, lineCap, lineJoin, miterLimit);
 		}
 
-		private static native void set(long stroker, int radius, int lineCap, int lineJoin, int miterLimit); /*
-			FT_Stroker_Set((FT_Stroker)stroker, radius, (FT_Stroker_LineCap)lineCap, (FT_Stroker_LineJoin)lineJoin, miterLimit);
-		*/
+		private static native void set (int stroker, int radius, int lineCap, int lineJoin, int miterLimit)/*-{
+			$wnd.Module._c_Stroker_set(stroker, radius, lineCap, lineJoin,
+					miterLimit);
+		}-*/;
 
 		@Override
 		public void dispose() {
 			done(address);
 		}
 
-		private static native void done(long stroker); /*
-			FT_Stroker_Done((FT_Stroker)stroker);
-		*/
+		private static native void done (int stroker)/*-{
+			$wnd.Module._c_Stroker_done(stroker);
+		}-*/;
 	}
 
    public static int FT_PIXEL_MODE_NONE = 0;
@@ -921,23 +933,16 @@ public class FreeType {
 	public static int FT_STROKER_LINEJOIN_MITER_FIXED    = 3;
 
    public static Library initFreeType() {   	
-   	new SharedLibraryLoader().load("gdx-freetype");
-   	long address = initFreeTypeJni();
+   	int address = initFreeTypeJni();
    	if(address == 0)
    		throw new GdxRuntimeException("Couldn't initialize FreeType library, FreeType error code: " + getLastErrorCode());
    	else
    		return new Library(address);
    }
    
-	private static native long initFreeTypeJni(); /*
-		FT_Library library = 0;
-		FT_Error error = FT_Init_FreeType(&library);
-		if(error) {
-			lastError = error;
-			return 0;
-		}
-		else return (jlong)library;
-	*/
+	private static native int initFreeTypeJni ()/*-{
+		return $wnd.Module._c_FreeType_initFreeTypeJni();
+	}-*/;
 
 	public static int toInt (int value) {
 		return ((value + 63) & -64) >> 6;
