@@ -521,13 +521,13 @@ public class FreeTypeFontGenerator implements Disposable {
 				int mainW = mainPixmap.getWidth(), mainH = mainPixmap.getHeight();
 				int shadowOffsetX = Math.max(parameter.shadowOffsetX, 0), shadowOffsetY = Math.max(parameter.shadowOffsetY, 0);
 				int shadowW = mainW + Math.abs(parameter.shadowOffsetX), shadowH = mainH + Math.abs(parameter.shadowOffsetY);
-				Pixmap shadowPixmap = new Pixmap(shadowW, shadowH, mainPixmap.getFormat());
+				Pixmap shadowPixmap = new FreeTypePixmap(shadowW, shadowH, mainPixmap.getFormat());
 
 				Color shadowColor = parameter.shadowColor;
 				float a = shadowColor.a;
 				if (a != 0) {
 					byte r = (byte)(shadowColor.r * 255), g = (byte)(shadowColor.g * 255), b = (byte)(shadowColor.b * 255);
-					ByteBuffer mainPixels = ((FreeTypePixmap)mainPixmap).getRealPixels();
+					ByteBuffer mainPixels = FreeTypePixmap.getRealPixels(mainPixmap);
 					ByteBuffer shadowPixels = ((FreeTypePixmap)shadowPixmap).getRealPixels();
 					for (int y = 0; y < mainH; y++) {
 						int shadowRow = shadowW * (y + shadowOffsetY) + shadowOffsetX;
