@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
-import com.badlogic.gdx.graphics.FreeTypePixmap;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Pixmap.Blending;
 import com.badlogic.gdx.graphics.Pixmap.Format;
@@ -162,9 +161,16 @@ public class FreeTypeFontGenerator implements Disposable {
 		if (updateTextureRegions)
 			parameter.packer.updateTextureRegions(data.regions, parameter.minFilter, parameter.magFilter, parameter.genMipMaps);
 		if (data.regions.isEmpty()) throw new GdxRuntimeException("Unable to create a font with no texture regions.");
-		BitmapFont font = new BitmapFont(data, data.regions, true);
+		BitmapFont font = newBitmapFont(data, data.regions, true);
 		font.setOwnsTexture(parameter.packer == null);
 		return font;
+	}
+
+	/** Called by generateFont to create a new {@link BitmapFont} instance. This allows injecting a customized {@link BitmapFont},
+	 * eg for a RTL font.
+	 * @see BitmapFont#BitmapFont(BitmapFontData, Array, boolean) */
+	protected BitmapFont newBitmapFont (BitmapFontData data, Array<TextureRegion> pageRegions, boolean integer) {
+		return new BitmapFont(data, pageRegions, integer);
 	}
 
 	/** Uses ascender and descender of font to calculate real height that makes all glyphs to fit in given pixel size. Source:
@@ -282,7 +288,6 @@ public class FreeTypeFontGenerator implements Disposable {
 	 * @param parameter configures how the font is generated */
 	public FreeTypeBitmapFontData generateData (FreeTypeFontParameter parameter, FreeTypeBitmapFontData data) {
 		data.name = name + "-" + parameter.size;
-		parameter = parameter == null ? new FreeTypeFontParameter() : parameter;
 		char[] characters = parameter.characters.toCharArray();
 		int charactersLength = characters.length;
 		boolean incremental = parameter.incremental;
@@ -527,8 +532,8 @@ public class FreeTypeFontGenerator implements Disposable {
 				float a = shadowColor.a;
 				if (a != 0) {
 					byte r = (byte)(shadowColor.r * 255), g = (byte)(shadowColor.g * 255), b = (byte)(shadowColor.b * 255);
-					ByteBuffer mainPixels = ((FreeTypePixmap)mainPixmap).getRealPixels();
-					ByteBuffer shadowPixels = ((FreeTypePixmap)shadowPixmap).getRealPixels();
+					ByteBuffer mainPixels = mainPixmap.getPixels();
+					ByteBuffer shadowPixels = shadowPixmap.getPixels();
 					for (int y = 0; y < mainH; y++) {
 						int shadowRow = shadowW * (y + shadowOffsetY) + shadowOffsetX;
 						for (int x = 0; x < mainW; x++) {
@@ -542,7 +547,6 @@ public class FreeTypeFontGenerator implements Disposable {
 							shadowPixels.put(shadowPixel + 3, (byte)((mainA & 0xff) * a));
 						}
 					}
-					((FreeTypePixmap)shadowPixmap).putPixelsBack(shadowPixels);
 				}
 
 				// Draw main glyph (with any border) on top of shadow.
