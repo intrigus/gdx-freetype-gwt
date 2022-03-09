@@ -26,8 +26,8 @@ after
 
 Add 
 ````
- compile "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:$version"
- compile "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:$version:sources"
+ implementation "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:$version"
+ implementation "com.github.intrigus.gdx-freetype-gwt:gdx-freetype-gwt:$version:sources"
 ````
 
 3. Modify your `HtmlLauncher.java` (or if it's not named so, modify the class in your `html` project that extends `GwtApplication`)
